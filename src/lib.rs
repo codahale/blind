@@ -20,7 +20,6 @@ impl<D: Digest<OutputSize = U64>> SecretKey<D> {
         let x = Scalar::random(rng);
         let xx = &RISTRETTO_BASEPOINT_TABLE * &x;
         let zz = RistrettoPoint::random(rng);
-
         SecretKey { x, xx, zz, _hash: Default::default() }
     }
 
@@ -31,7 +30,7 @@ impl<D: Digest<OutputSize = U64>> SecretKey<D> {
     pub fn initialize<R: RngCore + CryptoRng>(
         &self,
         rng: &mut R,
-    ) -> (SignerState<D>, SignerMessage1<D>) {
+    ) -> (SignerState<D>, SignerInitializeMessage<D>) {
         let a = Scalar::random(rng);
         let t = Scalar::random(rng);
         let y = Scalar::random(rng);
@@ -41,7 +40,7 @@ impl<D: Digest<OutputSize = U64>> SecretKey<D> {
 
         (
             SignerState { a, y, t, x: self.x, _hash: Default::default() },
-            SignerMessage1 { aa, cc, _hash: Default::default() },
+            SignerInitializeMessage { aa, cc, _hash: Default::default() },
         )
     }
 }
@@ -55,19 +54,19 @@ pub struct SignerState<D: Digest<OutputSize = U64>> {
 }
 
 impl<D: Digest<OutputSize = U64>> SignerState<D> {
-    pub fn finalize(self, msg: UserMessage<D>) -> SignerMessage2<D> {
+    pub fn finalize(self, msg: UserMessage<D>) -> SignerFinalizeMessage<D> {
         let s = (msg.c * self.y * self.x) + self.a;
-        SignerMessage2 { s, y: self.y, t: self.t, _hash: Default::default() }
+        SignerFinalizeMessage { s, y: self.y, t: self.t, _hash: Default::default() }
     }
 }
 
-pub struct SignerMessage1<D: Digest<OutputSize = U64>> {
+pub struct SignerInitializeMessage<D: Digest<OutputSize = U64>> {
     aa: RistrettoPoint,
     cc: RistrettoPoint,
     _hash: PhantomData<D>,
 }
 
-pub struct SignerMessage2<D: Digest<OutputSize = U64>> {
+pub struct SignerFinalizeMessage<D: Digest<OutputSize = U64>> {
     s: Scalar,
     y: Scalar,
     t: Scalar,
@@ -84,7 +83,7 @@ impl<D: Digest<OutputSize = U64>> PublicKey<D> {
     pub fn initialize<R: RngCore + CryptoRng>(
         &self,
         rng: &mut R,
-        msg1: SignerMessage1<D>,
+        msg1: SignerInitializeMessage<D>,
         m: &[u8],
     ) -> (UserState<D>, UserMessage<D>) {
         let r1 = Scalar::random(rng);
@@ -140,7 +139,7 @@ pub struct UserState<D: Digest<OutputSize = U64>> {
 }
 
 impl<D: Digest<OutputSize = U64>> UserState<D> {
-    pub fn finalize(self, msg2: SignerMessage2<D>) -> Signature<D> {
+    pub fn finalize(self, msg2: SignerFinalizeMessage<D>) -> Signature<D> {
         let s_p = (self.gamma1 * self.gamma2.invert()) * msg2.s + self.r1;
         let y_p = self.gamma1 * msg2.y;
         let t_p = self.gamma1 * msg2.t + self.r2;
