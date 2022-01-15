@@ -107,8 +107,8 @@ impl<D: Digest<OutputSize = U64>> PublicKey<D> {
 
     pub fn verify(&self, sig: &Signature<D>, m: &[u8]) -> bool {
         let cc = RistrettoPoint::multiscalar_mul([&sig.t, &sig.y], [&G, &self.zz]);
-        let a = RistrettoPoint::multiscalar_mul([&sig.s, &(-sig.c * sig.y)], [&G, &self.xx]);
-        let c_p = hash::<D>(a, cc, m);
+        let aa = RistrettoPoint::multiscalar_mul([&sig.s, &(-sig.c * sig.y)], [&G, &self.xx]);
+        let c_p = hash::<D>(aa, cc, m);
 
         sig.c == c_p
     }
