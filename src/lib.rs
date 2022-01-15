@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use curve25519_dalek::constants::{RISTRETTO_BASEPOINT_POINT, RISTRETTO_BASEPOINT_TABLE};
 use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
@@ -8,31 +6,33 @@ use digest::consts::U64;
 use digest::Digest;
 use rand::{CryptoRng, RngCore};
 
-pub struct SecretKey<D: Digest<OutputSize = U64>> {
+pub struct SecretKey {
     x: Scalar,
     xx: RistrettoPoint,
     zz: RistrettoPoint,
-    _hash: PhantomData<D>,
 }
 
-impl<D: Digest<OutputSize = U64>> SecretKey<D> {
-    pub fn new<R: RngCore + CryptoRng>(rng: &mut R) -> SecretKey<D> {
+impl SecretKey {
+    pub fn new<R>(rng: &mut R) -> SecretKey
+    where
+        R: RngCore + CryptoRng,
+    {
         // Algorithm BS_3.KG
         let x = nonzero_scalar(rng);
         let xx = &RISTRETTO_BASEPOINT_TABLE * &x;
         let zz = nonzero_point(rng);
 
-        SecretKey { x, xx, zz, _hash: Default::default() }
+        SecretKey { x, xx, zz }
     }
 
-    pub fn public_key(&self) -> PublicKey<D> {
-        PublicKey { xx: self.xx, zz: self.zz, _hash: Default::default() }
+    pub fn public_key(&self) -> PublicKey {
+        PublicKey { xx: self.xx, zz: self.zz }
     }
 
-    pub fn initialize<R: RngCore + CryptoRng>(
-        &self,
-        rng: &mut R,
-    ) -> (SignerState<D>, SignerInitializeMessage<D>) {
+    pub fn initialize<R>(&self, rng: &mut R) -> (SignerState, SignerInitializeMessage)
+    where
+        R: RngCore + CryptoRng,
+    {
         // Algorithm BS_3.S_1
         let a = nonzero_scalar(rng);
         let t = nonzero_scalar(rng);
@@ -41,57 +41,55 @@ impl<D: Digest<OutputSize = U64>> SecretKey<D> {
         let aa = &RISTRETTO_BASEPOINT_TABLE * &a;
         let cc = RistrettoPoint::multiscalar_mul([&t, &y], [&G, &self.zz]);
 
-        (
-            SignerState { a, y, t, x: self.x, _hash: Default::default() },
-            SignerInitializeMessage { aa, cc, _hash: Default::default() },
-        )
+        (SignerState { a, y, t, x: self.x }, SignerInitializeMessage { aa, cc })
     }
 }
 
-pub struct SignerState<D: Digest<OutputSize = U64>> {
+pub struct SignerState {
     a: Scalar,
     y: Scalar,
     t: Scalar,
     x: Scalar,
-    _hash: PhantomData<D>,
 }
 
-impl<D: Digest<OutputSize = U64>> SignerState<D> {
-    pub fn finalize(self, msg: UserMessage<D>) -> SignerFinalizeMessage<D> {
+impl SignerState {
+    pub fn finalize(self, msg: UserMessage) -> SignerFinalizeMessage {
         // Algorithm BS_3.S_2
         assert_ne!(msg.c, Scalar::zero());
+
         let s = (msg.c * self.y * self.x) + self.a;
 
-        SignerFinalizeMessage { s, y: self.y, t: self.t, _hash: Default::default() }
+        SignerFinalizeMessage { s, y: self.y, t: self.t }
     }
 }
 
-pub struct SignerInitializeMessage<D: Digest<OutputSize = U64>> {
+pub struct SignerInitializeMessage {
     aa: RistrettoPoint,
     cc: RistrettoPoint,
-    _hash: PhantomData<D>,
 }
 
-pub struct SignerFinalizeMessage<D: Digest<OutputSize = U64>> {
+pub struct SignerFinalizeMessage {
     s: Scalar,
     y: Scalar,
     t: Scalar,
-    _hash: PhantomData<D>,
 }
 
-pub struct PublicKey<D: Digest<OutputSize = U64>> {
+pub struct PublicKey {
     xx: RistrettoPoint,
     zz: RistrettoPoint,
-    _hash: PhantomData<D>,
 }
 
-impl<D: Digest<OutputSize = U64>> PublicKey<D> {
-    pub fn initialize<R: RngCore + CryptoRng>(
+impl PublicKey {
+    pub fn initialize<D, R>(
         &self,
         rng: &mut R,
-        msg1: SignerInitializeMessage<D>,
+        msg1: SignerInitializeMessage,
         m: &[u8],
-    ) -> (UserState<D>, UserMessage<D>) {
+    ) -> (UserState, UserMessage)
+    where
+        D: Digest<OutputSize = U64>,
+        R: RngCore + CryptoRng,
+    {
         // Algorithm BS_3.U_1
         let r1 = nonzero_scalar(rng);
         let r2 = nonzero_scalar(rng);
@@ -116,13 +114,15 @@ impl<D: Digest<OutputSize = U64>> PublicKey<D> {
                 r2,
                 gamma1,
                 gamma2,
-                _hash: Default::default(),
             },
-            UserMessage { c, _hash: Default::default() },
+            UserMessage { c },
         )
     }
 
-    pub fn verify(&self, sig: &Signature<D>, m: &[u8]) -> bool {
+    pub fn verify<D>(&self, sig: &Signature, m: &[u8]) -> bool
+    where
+        D: Digest<OutputSize = U64>,
+    {
         // Algorithm BS_3.Ver
         if sig.y == Scalar::zero() {
             return false;
@@ -136,7 +136,7 @@ impl<D: Digest<OutputSize = U64>> PublicKey<D> {
     }
 }
 
-pub struct UserState<D: Digest<OutputSize = U64>> {
+pub struct UserState {
     xx: RistrettoPoint,
     zz: RistrettoPoint,
     aa: RistrettoPoint,
@@ -147,38 +147,39 @@ pub struct UserState<D: Digest<OutputSize = U64>> {
     r2: Scalar,
     gamma1: Scalar,
     gamma2: Scalar,
-    _hash: PhantomData<D>,
 }
 
-impl<D: Digest<OutputSize = U64>> UserState<D> {
-    pub fn finalize(self, msg2: SignerFinalizeMessage<D>) -> Signature<D> {
+impl UserState {
+    pub fn finalize(self, msg2: SignerFinalizeMessage) -> Signature {
         // Algorithm BS_3.U_2
         assert_ne!(msg2.y, Scalar::zero());
         assert_eq!(self.cc, RistrettoPoint::multiscalar_mul([&msg2.t, &msg2.y], [&G, &self.zz]));
         assert_eq!(&RISTRETTO_BASEPOINT_TABLE * &msg2.s, self.aa + (self.xx * (self.c * msg2.y)));
+
         let s_p = (self.gamma1 * self.gamma2.invert()) * msg2.s + self.r1;
         let y_p = self.gamma1 * msg2.y;
         let t_p = self.gamma1 * msg2.t + self.r2;
 
-        Signature { c: self.c_p, s: s_p, y: y_p, t: t_p, _hash: Default::default() }
+        Signature { c: self.c_p, s: s_p, y: y_p, t: t_p }
     }
 }
 
-pub struct UserMessage<D: Digest<OutputSize = U64>> {
+pub struct UserMessage {
     c: Scalar,
-    _hash: PhantomData<D>,
 }
 
-pub struct Signature<D: Digest<OutputSize = U64>> {
+pub struct Signature {
     c: Scalar,
     s: Scalar,
     y: Scalar,
     t: Scalar,
-    _hash: PhantomData<D>,
 }
 
 #[inline]
-fn hash<D: Digest>(a: RistrettoPoint, b: RistrettoPoint, m: &[u8]) -> Scalar {
+fn hash<D>(a: RistrettoPoint, b: RistrettoPoint, m: &[u8]) -> Scalar
+where
+    D: Digest<OutputSize = U64>,
+{
     let d = D::new()
         .chain_update(a.compress().as_bytes())
         .chain_update(b.compress().as_bytes())
@@ -190,7 +191,10 @@ fn hash<D: Digest>(a: RistrettoPoint, b: RistrettoPoint, m: &[u8]) -> Scalar {
     Scalar::from_bytes_mod_order_wide(&output)
 }
 
-fn nonzero_scalar<R: RngCore + CryptoRng>(rng: &mut R) -> Scalar {
+fn nonzero_scalar<R>(rng: &mut R) -> Scalar
+where
+    R: RngCore + CryptoRng,
+{
     loop {
         let s = Scalar::random(rng);
         if s != Scalar::zero() {
@@ -199,7 +203,10 @@ fn nonzero_scalar<R: RngCore + CryptoRng>(rng: &mut R) -> Scalar {
     }
 }
 
-fn nonzero_point<R: RngCore + CryptoRng>(rng: &mut R) -> RistrettoPoint {
+fn nonzero_point<R>(rng: &mut R) -> RistrettoPoint
+where
+    R: RngCore + CryptoRng,
+{
     loop {
         let p = RistrettoPoint::random(rng);
         if !p.is_identity() {
@@ -222,14 +229,14 @@ mod tests {
     fn signing_and_verifying() {
         let mut rng = ChaChaRng::seed_from_u64(100);
         let msg = b"this is a secret";
-        let sk = SecretKey::<Sha3_512>::new(&mut rng);
+        let sk = SecretKey::new(&mut rng);
         let (s1, sm1) = sk.initialize(&mut rng);
         let pk = sk.public_key();
-        let (u1, um1) = pk.initialize(&mut rng, sm1, msg);
+        let (u1, um1) = pk.initialize::<Sha3_512, _>(&mut rng, sm1, msg);
         let sm2 = s1.finalize(um1);
         let sig = u1.finalize(sm2);
 
-        assert!(pk.verify(&sig, msg));
-        assert!(!pk.verify(&sig, b"some other guy"));
+        assert!(pk.verify::<Sha3_512>(&sig, msg));
+        assert!(!pk.verify::<Sha3_512>(&sig, b"some other guy"));
     }
 }
