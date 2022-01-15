@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use curve25519_dalek::constants::{RISTRETTO_BASEPOINT_POINT, RISTRETTO_BASEPOINT_TABLE};
 use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
-use curve25519_dalek::traits::MultiscalarMul;
+use curve25519_dalek::traits::{IsIdentity, MultiscalarMul};
 use digest::consts::U64;
 use digest::Digest;
 use rand::{CryptoRng, RngCore};
@@ -17,9 +17,10 @@ pub struct SecretKey<D: Digest<OutputSize = U64>> {
 
 impl<D: Digest<OutputSize = U64>> SecretKey<D> {
     pub fn new<R: RngCore + CryptoRng>(rng: &mut R) -> SecretKey<D> {
-        let x = Scalar::random(rng);
+        // Algorithm BS_3.KG
+        let x = nonzero_scalar(rng);
         let xx = &RISTRETTO_BASEPOINT_TABLE * &x;
-        let zz = RistrettoPoint::random(rng);
+        let zz = nonzero_point(rng);
 
         SecretKey { x, xx, zz, _hash: Default::default() }
     }
@@ -32,8 +33,9 @@ impl<D: Digest<OutputSize = U64>> SecretKey<D> {
         &self,
         rng: &mut R,
     ) -> (SignerState<D>, SignerInitializeMessage<D>) {
-        let a = Scalar::random(rng);
-        let t = Scalar::random(rng);
+        // Algorithm BS_3.S_1
+        let a = nonzero_scalar(rng);
+        let t = nonzero_scalar(rng);
         let y = Scalar::random(rng);
 
         let aa = &RISTRETTO_BASEPOINT_TABLE * &a;
@@ -56,6 +58,7 @@ pub struct SignerState<D: Digest<OutputSize = U64>> {
 
 impl<D: Digest<OutputSize = U64>> SignerState<D> {
     pub fn finalize(self, msg: UserMessage<D>) -> SignerFinalizeMessage<D> {
+        // Algorithm BS_3.S_2
         let s = (msg.c * self.y * self.x) + self.a;
 
         SignerFinalizeMessage { s, y: self.y, t: self.t, _hash: Default::default() }
@@ -88,8 +91,9 @@ impl<D: Digest<OutputSize = U64>> PublicKey<D> {
         msg1: SignerInitializeMessage<D>,
         m: &[u8],
     ) -> (UserState<D>, UserMessage<D>) {
-        let r1 = Scalar::random(rng);
-        let r2 = Scalar::random(rng);
+        // Algorithm BS_3.U_1
+        let r1 = nonzero_scalar(rng);
+        let r2 = nonzero_scalar(rng);
         let gamma1 = Scalar::random(rng);
         let gamma2 = Scalar::random(rng);
 
@@ -106,6 +110,7 @@ impl<D: Digest<OutputSize = U64>> PublicKey<D> {
     }
 
     pub fn verify(&self, sig: &Signature<D>, m: &[u8]) -> bool {
+        // Algorithm BS_3.Ver
         let cc = RistrettoPoint::multiscalar_mul([&sig.t, &sig.y], [&G, &self.zz]);
         let aa = RistrettoPoint::multiscalar_mul([&sig.s, &(-sig.c * sig.y)], [&G, &self.xx]);
         let c_p = hash::<D>(aa, cc, m);
@@ -125,6 +130,7 @@ pub struct UserState<D: Digest<OutputSize = U64>> {
 
 impl<D: Digest<OutputSize = U64>> UserState<D> {
     pub fn finalize(self, msg2: SignerFinalizeMessage<D>) -> Signature<D> {
+        // Algorithm BS_3.U_2
         let s_p = (self.gamma1 * self.gamma2.invert()) * msg2.s + self.r1;
         let y_p = self.gamma1 * msg2.y;
         let t_p = self.gamma1 * msg2.t + self.r2;
@@ -157,6 +163,24 @@ fn hash<D: Digest>(a: RistrettoPoint, b: RistrettoPoint, m: &[u8]) -> Scalar {
     output.copy_from_slice(d.finalize().as_slice());
 
     Scalar::from_bytes_mod_order_wide(&output)
+}
+
+fn nonzero_scalar<R: RngCore + CryptoRng>(rng: &mut R) -> Scalar {
+    loop {
+        let s = Scalar::random(rng);
+        if s != Scalar::zero() {
+            return s;
+        }
+    }
+}
+
+fn nonzero_point<R: RngCore + CryptoRng>(rng: &mut R) -> RistrettoPoint {
+    loop {
+        let p = RistrettoPoint::random(rng);
+        if !p.is_identity() {
+            return p;
+        }
+    }
 }
 
 const G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;
