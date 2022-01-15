@@ -94,7 +94,8 @@ impl PublicKey {
         let r1 = nonzero_scalar(rng);
         let r2 = nonzero_scalar(rng);
         let gamma1 = Scalar::random(rng);
-        let gamma2 = Scalar::random(rng);
+        let gamma2 = nonzero_scalar(rng);
+        // Tessaro & Zhu don't require gamma2 to be non-zero, but inversion of zero is not defined.
 
         let aa_p =
             RistrettoPoint::multiscalar_mul([&r1, &(gamma1 * gamma2.invert())], [&G, &msg1.aa]);
