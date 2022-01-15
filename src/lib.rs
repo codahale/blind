@@ -20,6 +20,7 @@ impl<D: Digest<OutputSize = U64>> SecretKey<D> {
         let x = Scalar::random(rng);
         let xx = &RISTRETTO_BASEPOINT_TABLE * &x;
         let zz = RistrettoPoint::random(rng);
+
         SecretKey { x, xx, zz, _hash: Default::default() }
     }
 
@@ -56,6 +57,7 @@ pub struct SignerState<D: Digest<OutputSize = U64>> {
 impl<D: Digest<OutputSize = U64>> SignerState<D> {
     pub fn finalize(self, msg: UserMessage<D>) -> SignerFinalizeMessage<D> {
         let s = (msg.c * self.y * self.x) + self.a;
+
         SignerFinalizeMessage { s, y: self.y, t: self.t, _hash: Default::default() }
     }
 }
