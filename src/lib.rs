@@ -94,16 +94,7 @@ impl<D: Digest<OutputSize = U64>> PublicKey<D> {
         let aa =
             RistrettoPoint::multiscalar_mul([&r1, &(gamma1 * gamma2.invert())], [&G, &msg1.aa]);
         let cc = RistrettoPoint::multiscalar_mul([&gamma1, &r2], [&msg1.cc, &G]);
-
-        let d = D::new()
-            .chain_update(aa.compress().as_bytes())
-            .chain_update(cc.compress().as_bytes())
-            .chain_update(m);
-
-        let mut output = [0u8; 64];
-        output.copy_from_slice(d.finalize().as_slice());
-        let c_p = Scalar::from_bytes_mod_order_wide(&output);
-
+        let c_p = hash::<D>(aa, cc, m);
         let c = c_p * gamma2;
 
         (
@@ -115,15 +106,7 @@ impl<D: Digest<OutputSize = U64>> PublicKey<D> {
     pub fn verify(&self, sig: &Signature<D>, m: &[u8]) -> bool {
         let cc = RistrettoPoint::multiscalar_mul([&sig.t, &sig.y], [&G, &self.zz]);
         let a = RistrettoPoint::multiscalar_mul([&sig.s, &(-sig.c * sig.y)], [&G, &self.xx]);
-
-        let d = D::new()
-            .chain_update(a.compress().as_bytes())
-            .chain_update(cc.compress().as_bytes())
-            .chain_update(m);
-
-        let mut output = [0u8; 64];
-        output.copy_from_slice(d.finalize().as_slice());
-        let c_p = Scalar::from_bytes_mod_order_wide(&output);
+        let c_p = hash::<D>(a, cc, m);
 
         sig.c == c_p
     }
@@ -161,6 +144,19 @@ pub struct Signature<D: Digest<OutputSize = U64>> {
     _hash: PhantomData<D>,
 }
 
+#[inline]
+fn hash<D: Digest>(a: RistrettoPoint, b: RistrettoPoint, m: &[u8]) -> Scalar {
+    let d = D::new()
+        .chain_update(a.compress().as_bytes())
+        .chain_update(b.compress().as_bytes())
+        .chain_update(m);
+
+    let mut output = [0u8; 64];
+    output.copy_from_slice(d.finalize().as_slice());
+
+    Scalar::from_bytes_mod_order_wide(&output)
+}
+
 const G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;
 
 #[cfg(test)]
@@ -175,17 +171,11 @@ mod tests {
     fn signing_and_verifying() {
         let mut rng = ChaChaRng::seed_from_u64(100);
         let msg = b"this is a secret";
-
         let sk = SecretKey::<Sha3_512>::new(&mut rng);
-
         let (s1, sm1) = sk.initialize(&mut rng);
-
         let pk = sk.public_key();
-
         let (u1, um1) = pk.initialize(&mut rng, sm1, msg);
-
         let sm2 = s1.finalize(um1);
-
         let sig = u1.finalize(sm2);
 
         assert!(pk.verify(&sig, msg));
