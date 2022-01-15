@@ -15,16 +15,6 @@ pub struct SecretKey<D: Digest<OutputSize = U64>> {
     _hash: PhantomData<D>,
 }
 
-pub fn key_gen<R: RngCore + CryptoRng>(
-    rng: &mut R,
-) -> ((Scalar,), (RistrettoPoint, RistrettoPoint)) {
-    let x = Scalar::random(rng);
-    let x_p = &RISTRETTO_BASEPOINT_TABLE * &x;
-    let z = RistrettoPoint::random(rng);
-
-    ((x,), (x_p, z))
-}
-
 impl<D: Digest<OutputSize = U64>> SecretKey<D> {
     pub fn new<R: RngCore + CryptoRng>(rng: &mut R) -> SecretKey<D> {
         let x = Scalar::random(rng);
