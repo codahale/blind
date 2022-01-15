@@ -1,0 +1,12 @@
+[package]
+name = "blind"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+curve25519-dalek = "4.0.0-pre.1"
+digest = "0.10"
+rand = "0.8"
+
+[dev-dependencies]
+sha3 = "0.10"
