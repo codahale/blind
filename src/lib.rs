@@ -59,6 +59,7 @@ pub struct SignerState<D: Digest<OutputSize = U64>> {
 impl<D: Digest<OutputSize = U64>> SignerState<D> {
     pub fn finalize(self, msg: UserMessage<D>) -> SignerFinalizeMessage<D> {
         // Algorithm BS_3.S_2
+        assert_ne!(msg.c, Scalar::zero());
         let s = (msg.c * self.y * self.x) + self.a;
 
         SignerFinalizeMessage { s, y: self.y, t: self.t, _hash: Default::default() }
@@ -97,20 +98,36 @@ impl<D: Digest<OutputSize = U64>> PublicKey<D> {
         let gamma1 = Scalar::random(rng);
         let gamma2 = Scalar::random(rng);
 
-        let aa =
+        let aa_p =
             RistrettoPoint::multiscalar_mul([&r1, &(gamma1 * gamma2.invert())], [&G, &msg1.aa]);
-        let cc = RistrettoPoint::multiscalar_mul([&gamma1, &r2], [&msg1.cc, &G]);
-        let c_p = hash::<D>(aa, cc, m);
+        let cc_p = RistrettoPoint::multiscalar_mul([&gamma1, &r2], [&msg1.cc, &G]);
+        let c_p = hash::<D>(aa_p, cc_p, m);
         let c = c_p * gamma2;
 
         (
-            UserState { c_p, r1, r2, gamma1, gamma2, _hash: Default::default() },
+            UserState {
+                xx: self.xx,
+                zz: self.zz,
+                aa: msg1.aa,
+                cc: msg1.cc,
+                c,
+                c_p,
+                r1,
+                r2,
+                gamma1,
+                gamma2,
+                _hash: Default::default(),
+            },
             UserMessage { c, _hash: Default::default() },
         )
     }
 
     pub fn verify(&self, sig: &Signature<D>, m: &[u8]) -> bool {
         // Algorithm BS_3.Ver
+        if sig.y == Scalar::zero() {
+            return false;
+        }
+
         let cc = RistrettoPoint::multiscalar_mul([&sig.t, &sig.y], [&G, &self.zz]);
         let aa = RistrettoPoint::multiscalar_mul([&sig.s, &(-sig.c * sig.y)], [&G, &self.xx]);
         let c_p = hash::<D>(aa, cc, m);
@@ -120,6 +137,11 @@ impl<D: Digest<OutputSize = U64>> PublicKey<D> {
 }
 
 pub struct UserState<D: Digest<OutputSize = U64>> {
+    xx: RistrettoPoint,
+    zz: RistrettoPoint,
+    aa: RistrettoPoint,
+    cc: RistrettoPoint,
+    c: Scalar,
     c_p: Scalar,
     r1: Scalar,
     r2: Scalar,
@@ -131,6 +153,9 @@ pub struct UserState<D: Digest<OutputSize = U64>> {
 impl<D: Digest<OutputSize = U64>> UserState<D> {
     pub fn finalize(self, msg2: SignerFinalizeMessage<D>) -> Signature<D> {
         // Algorithm BS_3.U_2
+        assert_ne!(msg2.y, Scalar::zero());
+        assert_eq!(self.cc, RistrettoPoint::multiscalar_mul([&msg2.t, &msg2.y], [&G, &self.zz]));
+        assert_eq!(&RISTRETTO_BASEPOINT_TABLE * &msg2.s, self.aa + (self.xx * (self.c * msg2.y)));
         let s_p = (self.gamma1 * self.gamma2.invert()) * msg2.s + self.r1;
         let y_p = self.gamma1 * msg2.y;
         let t_p = self.gamma1 * msg2.t + self.r2;
